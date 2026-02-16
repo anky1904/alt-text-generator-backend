@@ -58,12 +58,14 @@ app.post("/generate-alt", async (req, res) => {
 
     const isOwner = internalKey === process.env.INTERNAL_KEY;
 
-    // Apply limits ONLY to public users
+    /* ===== PUBLIC LIMIT: 10 PER DAY ===== */
     if (!isOwner) {
       resetIfNewDay(ip);
 
-      if (ipStore[ip].count + images.length > 30) {
-        return res.status(429).json({ error: "Daily limit reached (30 images)." });
+      if (ipStore[ip].count + images.length > 10) {
+        return res
+          .status(429)
+          .json({ error: "Daily quota limit exceeded (10 images per day)." });
       }
 
       ipStore[ip].count += images.length;
@@ -75,7 +77,7 @@ app.post("/generate-alt", async (req, res) => {
       try {
         let geminiResponse;
 
-        // ===== Extract product name from URL =====
+        /* ===== Extract product name from URL ===== */
         const productName = img
           .split("/")
           .pop()
@@ -107,20 +109,19 @@ app.post("/generate-alt", async (req, res) => {
                       text: `
 You are an expert eCommerce SEO specialist.
 
-Product name from URL:
+Product name:
 "${productName}"
 
 TASK:
-Generate SEO-optimized ALT TEXT for this product image.
+Generate SEO-optimized ALT TEXT.
 
-STRICT RULES:
-- Alt text MUST start with the exact product name.
-- Must describe the real product in the image.
-- Do NOT hallucinate wrong foods/items.
-- Keep under 100 characters.
-- Natural, keyword-rich, ecommerce-ready.
+RULES:
+- MUST start with product name.
+- Under 100 characters.
+- No hallucination.
+- Natural and keyword rich.
 
-Return ONLY valid JSON:
+Return ONLY JSON:
 
 {
   "alt_text": "...",
@@ -149,18 +150,14 @@ Return ONLY valid JSON:
                       text: `
 You are an expert eCommerce SEO specialist.
 
-Product name from URL:
+Product name:
 "${productName}"
 
-Generate correct SEO ALT TEXT for this product image URL:
+Generate correct SEO ALT TEXT for image URL:
 
 ${img}
 
-RULES:
-- MUST start with the product name.
-- Under 100 characters.
-- No hallucination.
-- Return ONLY JSON:
+Return ONLY JSON:
 
 {
   "alt_text": "...",
