@@ -9,6 +9,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+// In-memory IP usage store
 let ipStore = {};
 
 // Reset counts daily
@@ -30,7 +31,7 @@ app.post("/generate-alt", async (req, res) => {
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const internalKey = req.headers["x-internal-key"];
 
-    // Internal unlimited access
+    // Public users → 30 images/day limit
     if (internalKey !== process.env.INTERNAL_KEY) {
       resetIfNewDay(ip);
 
@@ -44,14 +45,15 @@ app.post("/generate-alt", async (req, res) => {
     const results = [];
 
     for (const img of images) {
-      const geminiResponse = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          contents: [
-            {
-              parts: [
-                {
-                  text: `
+      try {
+        const geminiResponse = await axios.post(
+          "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
+          {
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `
 Generate SEO optimized image alt text under 100 characters.
 
 Rules:
@@ -70,19 +72,30 @@ ${JSON.stringify(context)}
 Image URL:
 ${img}
 `
-                }
-              ]
-            }
-          ]
-        }
-      );
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            params: { key: process.env.GEMINI_API_KEY }
+          }
+        );
 
-      const text = geminiResponse.data.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
+        const text =
+          geminiResponse.data.candidates?.[0]?.content?.parts?.[0]?.text ||
+          "No response";
 
-      results.push({
-        image: img,
-        output: text
-      });
+        results.push({
+          image: img,
+          output: text
+        });
+      } catch (err) {
+        results.push({
+          image: img,
+          output: "Error generating alt text"
+        });
+      }
     }
 
     res.json({ results });
@@ -95,3 +108,4 @@ ${img}
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
