@@ -27,7 +27,7 @@ app.get("/", (req, res) => {
 
 app.post("/generate-alt", async (req, res) => {
   try {
-    const { images, context } = req.body;
+    const { images = [], context = {} } = req.body;
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const internalKey = req.headers["x-internal-key"];
 
@@ -54,17 +54,15 @@ app.post("/generate-alt", async (req, res) => {
                 parts: [
                   {
                     text: `
-Generate SEO optimized image alt text under 100 characters.
+Return ONLY valid JSON. No explanation.
 
-Rules:
-- Include primary keyword and brand if relevant
-- Natural descriptive language
-- No keyword stuffing
-
-Also return:
-- SEO score (0-100)
-- Issues if any
-- Suggested filename
+Format:
+{
+  "alt_text": "SEO friendly alt text under 100 characters including keyword and brand",
+  "score": number from 0-100,
+  "issues": "short issue description or None",
+  "filename": "seo-optimized-file-name.jpg"
+}
 
 Context:
 ${JSON.stringify(context)}
@@ -82,18 +80,36 @@ ${img}
           }
         );
 
-        const text =
-          geminiResponse.data.candidates?.[0]?.content?.parts?.[0]?.text ||
-          "No response";
+        const rawText =
+          geminiResponse.data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+
+        let parsed;
+
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          parsed = {
+            alt_text: rawText,
+            score: "",
+            issues: "",
+            filename: ""
+          };
+        }
 
         results.push({
           image: img,
-          output: text
+          alt_text: parsed.alt_text || "",
+          score: parsed.score || "",
+          issues: parsed.issues || "",
+          filename: parsed.filename || ""
         });
       } catch (err) {
         results.push({
           image: img,
-          output: "Error generating alt text"
+          alt_text: "Error generating alt text",
+          score: "",
+          issues: "Gemini request failed",
+          filename: ""
         });
       }
     }
@@ -108,4 +124,3 @@ ${img}
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
