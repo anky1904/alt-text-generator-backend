@@ -41,6 +41,33 @@ function extractJSON(text) {
   return null;
 }
 
+/* ================= HELPER: delay ================= */
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/* ================= HELPER: Gemini call with retry ================= */
+
+async function callGemini(payload) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await axios.post(
+        "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent",
+        payload,
+        { params: { key: process.env.GEMINI_API_KEY } }
+      );
+
+      return res;
+    } catch (err) {
+      if (attempt === 2) throw err;
+
+      // wait before retry (rate limit protection)
+      await sleep(1500);
+    }
+  }
+}
+
 /* ================= HEALTH CHECK ================= */
 
 app.get("/", (req, res) => {
@@ -75,9 +102,7 @@ app.post("/generate-alt", async (req, res) => {
 
     for (const img of images) {
       try {
-        let geminiResponse;
-
-        /* ===== Extract product name from URL ===== */
+        /* ===== Extract product name ===== */
         const productName = img
           .split("/")
           .pop()
@@ -86,9 +111,10 @@ app.post("/generate-alt", async (req, res) => {
           .replace(/\.(jpg|jpeg|png|webp|gif)/i, "")
           .trim();
 
-        try {
-          /* ===== TRY VISION MODE ===== */
+        let geminiResponse;
 
+        try {
+          /* ===== Vision mode ===== */
           const imageResponse = await axios.get(img, {
             responseType: "arraybuffer",
             timeout: 10000,
@@ -98,81 +124,62 @@ app.post("/generate-alt", async (req, res) => {
           const base64Image = Buffer.from(imageResponse.data).toString("base64");
           const mimeType = imageResponse.headers["content-type"] || "image/jpeg";
 
-          geminiResponse = await axios.post(
-            "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent",
-            {
-              contents: [
-                {
-                  parts: [
-                    { inlineData: { mimeType, data: base64Image } },
-                    {
-                      text: `
+          geminiResponse = await callGemini({
+            contents: [
+              {
+                parts: [
+                  { inlineData: { mimeType, data: base64Image } },
+                  {
+                    text: `
 You are an expert eCommerce SEO specialist.
 
 Product name:
 "${productName}"
 
-TASK:
-Generate SEO-optimized ALT TEXT.
-
-RULES:
-- MUST start with product name.
-- Under 100 characters.
-- No hallucination.
-- Natural and keyword rich.
+Generate SEO alt text under 100 characters.
+Must start with product name.
+No hallucination.
 
 Return ONLY JSON:
-
 {
   "alt_text": "...",
-  "score": number 0-100,
-  "issues": "None or short issue",
-  "filename": "seo-file-name.jpg"
-}
-`
-                    }
-                  ]
-                }
-              ]
-            },
-            { params: { key: process.env.GEMINI_API_KEY } }
-          );
-        } catch {
-          /* ===== FALLBACK TEXT MODE ===== */
-
-          geminiResponse = await axios.post(
-            "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent",
-            {
-              contents: [
-                {
-                  parts: [
-                    {
-                      text: `
-You are an expert eCommerce SEO specialist.
-
-Product name:
-"${productName}"
-
-Generate correct SEO ALT TEXT for image URL:
-
-${img}
-
-Return ONLY JSON:
-
-{
-  "alt_text": "...",
-  "score": number 0-100,
+  "score": number,
   "issues": "...",
   "filename": "seo-file-name.jpg"
 }
 `
-                    }
-                  ]
-                }
-              ]
-            },
-            { params: { key: process.env.GEMINI_API_KEY } }
-          );
+                  }
+                ]
+              }
+            ]
+          });
+        } catch {
+          /* ===== Fallback text mode ===== */
+          geminiResponse = await callGemini({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `
+Generate SEO alt text for product:
+"${productName}"
+
+Image URL:
+${img}
+
+Return ONLY JSON:
+{
+  "alt_text": "...",
+  "score": number,
+  "issues": "...",
+  "filename": "seo-file-name.jpg"
+}
+`
+                  }
+                ]
+              }
+            ]
+          });
         }
 
         const rawText =
@@ -197,12 +204,16 @@ Return ONLY JSON:
             filename: ""
           });
         }
+
+        // 🔹 Delay between images → prevents Gemini rate limit
+        await sleep(1200);
+
       } catch {
         results.push({
           image: img,
-          alt_text: "Failed completely",
+          alt_text: "Failed after retry",
           score: "",
-          issues: "Gemini error",
+          issues: "Gemini temporary failure",
           filename: ""
         });
       }
