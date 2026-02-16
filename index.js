@@ -25,6 +25,29 @@ app.get("/", (req, res) => {
   res.send("Alt Text Generator Backend Running");
 });
 
+// 🔹 Helper: safely extract JSON from Gemini text
+function extractJSON(text) {
+  if (!text) return null;
+
+  // Remove markdown wrappers ```json ```
+  let cleaned = text.replace(/```json|```/g, "").trim();
+
+  // Try direct JSON parse
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+
+  // Try to extract JSON substring between { ... }
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      return JSON.parse(match[0]);
+    } catch {}
+  }
+
+  return null;
+}
+
 app.post("/generate-alt", async (req, res) => {
   try {
     const { images = [], context = {} } = req.body;
@@ -80,32 +103,30 @@ ${img}
           }
         );
 
-        let rawText =
-          geminiResponse.data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+        const rawText =
+          geminiResponse.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-        // 🔹 Remove markdown wrappers like ```json ```
-        rawText = rawText.replace(/```json|```/g, "").trim();
+        const parsed = extractJSON(rawText);
 
-        let parsed;
-
-        try {
-          parsed = JSON.parse(rawText);
-        } catch {
-          parsed = {
-            alt_text: rawText,
+        // 🔹 If JSON parsed successfully
+        if (parsed) {
+          results.push({
+            image: img,
+            alt_text: parsed.alt_text || "",
+            score: parsed.score || "",
+            issues: parsed.issues || "",
+            filename: parsed.filename || ""
+          });
+        } else {
+          // 🔹 Fallback if Gemini didn't return JSON
+          results.push({
+            image: img,
+            alt_text: rawText || "Alt text not generated",
             score: "",
-            issues: "",
+            issues: "Invalid AI response format",
             filename: ""
-          };
+          });
         }
-
-        results.push({
-          image: img,
-          alt_text: parsed.alt_text || "",
-          score: parsed.score || "",
-          issues: parsed.issues || "",
-          filename: parsed.filename || ""
-        });
       } catch (err) {
         results.push({
           image: img,
