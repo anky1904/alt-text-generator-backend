@@ -5,40 +5,31 @@ require("dotenv").config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 3000;
 
-// In-memory IP usage store
+// ===== Daily limit store =====
 let ipStore = {};
 
-// Reset counts daily
 function resetIfNewDay(ip) {
   const today = new Date().toISOString().slice(0, 10);
-
   if (!ipStore[ip] || ipStore[ip].date !== today) {
     ipStore[ip] = { count: 0, date: today };
   }
 }
 
-app.get("/", (req, res) => {
-  res.send("Alt Text Generator Backend Running");
-});
-
-// 🔹 Helper: safely extract JSON from Gemini text
+// ===== Extract JSON safely =====
 function extractJSON(text) {
   if (!text) return null;
 
-  // Remove markdown wrappers ```json ```
-  let cleaned = text.replace(/```json|```/g, "").trim();
+  text = text.replace(/```json|```/g, "").trim();
 
-  // Try direct JSON parse
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(text);
   } catch {}
 
-  // Try to extract JSON substring between { ... }
-  const match = cleaned.match(/\{[\s\S]*\}/);
+  const match = text.match(/\{[\s\S]*\}/);
   if (match) {
     try {
       return JSON.parse(match[0]);
@@ -48,20 +39,24 @@ function extractJSON(text) {
   return null;
 }
 
+// ===== Health route =====
+app.get("/", (req, res) => {
+  res.send("Alt Text Generator Backend Running");
+});
+
+// ===== Main route =====
 app.post("/generate-alt", async (req, res) => {
   try {
     const { images = [], context = {} } = req.body;
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const internalKey = req.headers["x-internal-key"];
 
-    // Public users → 30 images/day limit
+    // Public limit
     if (internalKey !== process.env.INTERNAL_KEY) {
       resetIfNewDay(ip);
-
       if (ipStore[ip].count + images.length > 30) {
         return res.status(429).json({ error: "Daily limit reached (30 images)." });
       }
-
       ipStore[ip].count += images.length;
     }
 
@@ -69,12 +64,28 @@ app.post("/generate-alt", async (req, res) => {
 
     for (const img of images) {
       try {
+        // 🔹 Download image
+        const imageResponse = await axios.get(img, {
+          responseType: "arraybuffer",
+          timeout: 10000
+        });
+
+        const base64Image = Buffer.from(imageResponse.data).toString("base64");
+        const mimeType = imageResponse.headers["content-type"] || "image/jpeg";
+
+        // 🔹 Gemini Vision call
         const geminiResponse = await axios.post(
           "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
           {
             contents: [
               {
                 parts: [
+                  {
+                    inlineData: {
+                      mimeType,
+                      data: base64Image
+                    }
+                  },
                   {
                     text: `
 Return ONLY valid JSON. No explanation.
@@ -89,9 +100,6 @@ Format:
 
 Context:
 ${JSON.stringify(context)}
-
-Image URL:
-${img}
 `
                   }
                 ]
@@ -99,7 +107,8 @@ ${img}
             ]
           },
           {
-            params: { key: process.env.GEMINI_API_KEY }
+            params: { key: process.env.GEMINI_API_KEY },
+            timeout: 20000
           }
         );
 
@@ -108,7 +117,6 @@ ${img}
 
         const parsed = extractJSON(rawText);
 
-        // 🔹 If JSON parsed successfully
         if (parsed) {
           results.push({
             image: img,
@@ -118,7 +126,6 @@ ${img}
             filename: parsed.filename || ""
           });
         } else {
-          // 🔹 Fallback if Gemini didn't return JSON
           results.push({
             image: img,
             alt_text: rawText || "Alt text not generated",
@@ -132,7 +139,7 @@ ${img}
           image: img,
           alt_text: "Error generating alt text",
           score: "",
-          issues: "Gemini request failed",
+          issues: "Image or Gemini request failed",
           filename: ""
         });
       }
