@@ -69,7 +69,7 @@ app.post("/generate-alt", async (req, res) => {
         let geminiResponse;
 
         try {
-          // Try Vision mode (download image)
+          // ===== Try Vision mode =====
           const imageResponse = await axios.get(img, {
             responseType: "arraybuffer",
             timeout: 10000,
@@ -80,7 +80,7 @@ app.post("/generate-alt", async (req, res) => {
           const mimeType = imageResponse.headers["content-type"] || "image/jpeg";
 
           geminiResponse = await axios.post(
-            "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent",
             {
               contents: [
                 {
@@ -105,9 +105,9 @@ Return ONLY JSON:
             { params: { key: process.env.GEMINI_API_KEY } }
           );
         } catch {
-          // Fallback: text-only mode
+          // ===== Fallback text-only mode =====
           geminiResponse = await axios.post(
-            "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
+            "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent",
             {
               contents: [
                 {
