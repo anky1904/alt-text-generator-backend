@@ -1,0 +1,15 @@
+{
+  "name": "alt-text-generator-backend",
+  "version": "1.0.0",
+  "description": "Backend for bulk image alt text generator using Gemini",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2"
+  }
+}
