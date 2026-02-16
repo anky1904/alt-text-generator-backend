@@ -80,8 +80,11 @@ ${img}
           }
         );
 
-        const rawText =
+        let rawText =
           geminiResponse.data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+
+        // 🔹 Remove markdown wrappers like ```json ```
+        rawText = rawText.replace(/```json|```/g, "").trim();
 
         let parsed;
 
