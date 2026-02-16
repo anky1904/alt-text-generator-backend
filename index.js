@@ -9,7 +9,8 @@ app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 3000;
 
-// ===== Daily limit store =====
+/* ================= DAILY LIMIT STORE ================= */
+
 let ipStore = {};
 
 function resetIfNewDay(ip) {
@@ -19,7 +20,8 @@ function resetIfNewDay(ip) {
   }
 }
 
-// ===== Extract JSON safely =====
+/* ================= JSON EXTRACTION ================= */
+
 function extractJSON(text) {
   if (!text) return null;
 
@@ -39,20 +41,25 @@ function extractJSON(text) {
   return null;
 }
 
-// ===== Health check =====
+/* ================= HEALTH CHECK ================= */
+
 app.get("/", (req, res) => {
   res.send("Alt Text Generator Backend Running");
 });
 
-// ===== Main API =====
+/* ================= MAIN API ================= */
+
 app.post("/generate-alt", async (req, res) => {
   try {
     const { images = [] } = req.body;
+
     const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
     const internalKey = req.headers["x-internal-key"];
 
-    // Public daily limit
-    if (internalKey !== process.env.INTERNAL_KEY) {
+    const isOwner = internalKey === process.env.INTERNAL_KEY;
+
+    // Apply limits ONLY to public users
+    if (!isOwner) {
       resetIfNewDay(ip);
 
       if (ipStore[ip].count + images.length > 30) {
@@ -68,8 +75,18 @@ app.post("/generate-alt", async (req, res) => {
       try {
         let geminiResponse;
 
+        // ===== Extract product name from URL =====
+        const productName = img
+          .split("/")
+          .pop()
+          .split("?")[0]
+          .replace(/[-_]/g, " ")
+          .replace(/\.(jpg|jpeg|png|webp|gif)/i, "")
+          .trim();
+
         try {
-          // ===== Try Vision mode =====
+          /* ===== TRY VISION MODE ===== */
+
           const imageResponse = await axios.get(img, {
             responseType: "arraybuffer",
             timeout: 10000,
@@ -88,12 +105,27 @@ app.post("/generate-alt", async (req, res) => {
                     { inlineData: { mimeType, data: base64Image } },
                     {
                       text: `
-Return ONLY JSON:
+You are an expert eCommerce SEO specialist.
+
+Product name from URL:
+"${productName}"
+
+TASK:
+Generate SEO-optimized ALT TEXT for this product image.
+
+STRICT RULES:
+- Alt text MUST start with the exact product name.
+- Must describe the real product in the image.
+- Do NOT hallucinate wrong foods/items.
+- Keep under 100 characters.
+- Natural, keyword-rich, ecommerce-ready.
+
+Return ONLY valid JSON:
 
 {
-  "alt_text": "SEO alt text under 100 chars",
+  "alt_text": "...",
   "score": number 0-100,
-  "issues": "short issue or None",
+  "issues": "None or short issue",
   "filename": "seo-file-name.jpg"
 }
 `
@@ -105,7 +137,8 @@ Return ONLY JSON:
             { params: { key: process.env.GEMINI_API_KEY } }
           );
         } catch {
-          // ===== Fallback text-only mode =====
+          /* ===== FALLBACK TEXT MODE ===== */
+
           geminiResponse = await axios.post(
             "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent",
             {
@@ -114,11 +147,20 @@ Return ONLY JSON:
                   parts: [
                     {
                       text: `
-Generate SEO alt text for this image URL:
+You are an expert eCommerce SEO specialist.
+
+Product name from URL:
+"${productName}"
+
+Generate correct SEO ALT TEXT for this product image URL:
 
 ${img}
 
-Return ONLY JSON:
+RULES:
+- MUST start with the product name.
+- Under 100 characters.
+- No hallucination.
+- Return ONLY JSON:
 
 {
   "alt_text": "...",
